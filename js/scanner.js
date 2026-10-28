@@ -80,21 +80,22 @@ function capture() {
 
 function fromFile(e) {
   const f = e.target.files[0];
-  e.target.value = '';
+  if (e.target) e.target.value = '';
   if (!f) return;
   if (f.size > MAX_BYTES) return msg('A imagem passa de 10 MB. Escolha um arquivo menor.');
-  const url = URL.createObjectURL(f);
-  const img = new Image();
-  img.onload = () => {
-    const photo = toJpeg(img, img.naturalWidth, img.naturalHeight);
-    URL.revokeObjectURL(url);
-    review(photo, f.name);
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const img = new Image();
+    img.onload = () => {
+      const photo = toJpeg(img, img.naturalWidth, img.naturalHeight);
+      review(photo, f.name);
+    };
+    img.onerror = () => msg('Não consegui processar essa imagem. Tente tirar a foto pelo botão da câmera.');
+    img.src = ev.target.result;
   };
-  img.onerror = () => {
-    URL.revokeObjectURL(url);
-    msg('Não consegui abrir essa imagem. Se for HEIC, tente tirar a foto pelo botão da câmera ou converter para JPG.');
-  };
-  img.src = url;
+  reader.onerror = () => msg('Erro de memória ao ler a imagem.');
+  reader.readAsDataURL(f);
 }
 
 function useIt() {

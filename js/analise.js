@@ -1,5 +1,5 @@
 // Cole aqui a URL do seu Worker. Vazio = simulação (sem IA).
-const API_URL = '';
+const API_URL = '/analisar'; 
 
 const COR = {
   plastico: '#f6a85c', papel: '#e4cf9a', vidro: '#a8d8c9', metal: '#c8d0d8',
@@ -53,6 +53,18 @@ function normalizar(d) {
   };
 }
 
+// Função para converter o texto Base64 num Arquivo (Blob) para envio
+function dataURItoBlob(dataURI) {
+    const byteString = atob(dataURI.split(',')[1]);
+    const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
+    const ab = new ArrayBuffer(byteString.length);
+    const ia = new Uint8Array(ab);
+    for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
+    }
+    return new Blob([ab], { type: mimeString });
+}
+
 // ---- Análise (com cache na sessão para não pagar duas vezes pela mesma foto) ----
 async function analisar(dataUrl) {
   if (!API_URL) {
@@ -69,16 +81,47 @@ async function analisar(dataUrl) {
   const timer = setTimeout(() => ctrl.abort(), 30000);
   let resp;
   try {
+    // 1. Transforma o Base64 num formato de Arquivo Leve
+    const blobLeve = dataURItoBlob(dataUrl);
+    const formData = new FormData();
+    formData.append("file", blobLeve, "foto_otimizada.jpg");
+
     resp = await fetch(API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imagem: dataUrl }),
+      headers: { 
+          // Retirado o Content-Type manual para que o navegador configure o upload corretamente
+          'ngrok-skip-browser-warning': 'true' // Impede bloqueios do Ngrok no telemóvel
+      },
+      body: formData, // Envia o ficheiro da mesma forma que no inicio.js
       signal: ctrl.signal
     });
   } finally { clearTimeout(timer); }
+  
   if (!resp.ok) throw new Error('api');
 
-  const r = normalizar(await resp.json());
+  const dadosAPI = await resp.json();
+
+  // 2. Mapeia as categorias da Groq para as categorias de Cores e Destinos do Frontend
+  const textoCategoria = dadosAPI.categoria.toLowerCase();
+  let catBase = "outro";
+  if (textoCategoria.includes("plástico") || textoCategoria.includes("plastico")) catBase = "plastico";
+  else if (textoCategoria.includes("papel")) catBase = "papel";
+  else if (textoCategoria.includes("metal")) catBase = "metal";
+  else if (textoCategoria.includes("vidro")) catBase = "vidro";
+  else if (textoCategoria.includes("eletrônico") || textoCategoria.includes("eletronico")) catBase = "eletronico";
+  else if (textoCategoria.includes("orgânico") || textoCategoria.includes("organico")) catBase = "organico";
+  else if (textoCategoria.includes("perigoso") || textoCategoria.includes("especial")) catBase = "perigoso";
+
+  // 3. Monta o objeto para ser lido pela função normalizar()
+  const r = normalizar({
+      identificado: true,
+      nome: dadosAPI.material,
+      chip: dadosAPI.categoria,
+      categoria: catBase,
+      reciclavel: textoCategoria.includes("reciclável") || textoCategoria.includes("reciclavel") ? "sim" : "nao",
+      passos: dadosAPI.instrucoes
+  });
+
   try { sessionStorage.setItem('radareco:analise', JSON.stringify({ k, r })); } catch (_) {}
   return r;
 }
